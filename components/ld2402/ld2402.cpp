@@ -415,7 +415,6 @@ void LD2402Component::cmd_set_engineer_mode(
                 parse_state_   = ParseState::IDLE;
                 line_buf_.clear();
                 if (work_mode_sensor_)
-                    // work_mode_sensor_->publish_state(enable ? "Engineer" : "Normal");
                     work_mode_sensor_->publish_state(enable ? "工程" : "正常");
             }
             cb(ok);
@@ -694,15 +693,13 @@ void LD2402Component::cmd_read_param(uint16_t id,
 // ═══════════════════════════════════════════════════════════════════
 
 void LD2402Component::register_web_handler_() {
-    if (web_started_) return;
     if (web_server_base::global_web_server_base == nullptr) {
         ESP_LOGW(TAG, "ESPHome web server is not available; LD2402 web UI disabled");
         return;
     }
     web_server_base::global_web_server_base->init();
     web_server_base::global_web_server_base->add_handler(this);
-    web_started_ = true;
-    ESP_LOGI(TAG, "LD2402 web UI registered at /test");
+    ESP_LOGI(TAG, "LD2402 web UI registered at /config");
 }
 
 bool LD2402Component::canHandle(AsyncWebServerRequest *request) const {
@@ -711,11 +708,11 @@ bool LD2402Component::canHandle(AsyncWebServerRequest *request) const {
 #ifdef USE_ESP32
     char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
     std::string url(request->url_to(url_buf));
-    return url == "/test" || url == "/test/" || url == "/test/api/info" || url == "/test/api/cmd";
+    return url == "/config" || url == "/config/" || url == "/config/api/info" || url == "/config/api/cmd";
 #else
     String url = request->url();
-    return url == ESPHOME_F("/test") || url == ESPHOME_F("/test/") || url == ESPHOME_F("/test/api/info") ||
-           url == ESPHOME_F("/test/api/cmd");
+    return url == ESPHOME_F("/config") || url == ESPHOME_F("/config/") || url == ESPHOME_F("/config/api/info") ||
+           url == ESPHOME_F("/config/api/cmd");
 #endif
 }
 
@@ -726,11 +723,11 @@ void LD2402Component::handleRequest(AsyncWebServerRequest *request) {
 #else
     String url = request->url();
 #endif
-    if (request->method() == HTTP_GET && (url == "/test" || url == "/test/")) {
+    if (request->method() == HTTP_GET && (url == "/config" || url == "/config/")) {
         this->handle_web_root_(request);
-    } else if (request->method() == HTTP_GET && url == "/test/api/info") {
+    } else if (request->method() == HTTP_GET && url == "/config/api/info") {
         this->handle_web_info_(request);
-    } else if (request->method() == HTTP_POST && url == "/test/api/cmd") {
+    } else if (request->method() == HTTP_POST && url == "/config/api/cmd") {
         this->handle_web_cmd_(request);
     } else {
         request->send(404, "text/plain", "Not found");

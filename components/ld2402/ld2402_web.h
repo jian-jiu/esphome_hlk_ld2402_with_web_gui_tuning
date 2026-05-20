@@ -373,7 +373,7 @@ function resumeSSE(delayMs = 800) {
 
 async function fetchState() {
   try {
-    const res = await fetch('/test/api/info');
+    const res = await fetch('/config/api/info');
     const d = await res.json();
     document.getElementById('dist').textContent = d.dist + ' cm';
     const present = d.result !== 0;
@@ -411,7 +411,7 @@ async function saveFlash() {
   log('正在保存到 Flash...');
   pauseSSE();
   try {
-    const res = await fetch('/test/api/cmd', {
+    const res = await fetch('/config/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd: 'save_flash' })
@@ -443,7 +443,7 @@ let progressTimer = null;
 function queryProgress() {
   if (progressTimer) clearInterval(progressTimer);
   progressTimer = setInterval(async () => {
-      const res = await fetch('/test/api/cmd', {
+    const res = await fetch('/config/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd: 'auto_progress' })
@@ -463,7 +463,7 @@ function queryProgress() {
 // ── 通用 API ──────────────────────────────────────────────────
 async function apiCmd(cmd, extra = {}) {
   try {
-      const res = await fetch('/test/api/cmd', {
+    const res = await fetch('/config/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd, ...extra })
@@ -481,7 +481,7 @@ async function fetchInfo() {
   await apiCmd('read_info');
   setTimeout(async () => {
     try {
-      const res = await fetch('/test/api/info');
+      const res = await fetch('/config/api/info');
       const d   = await res.json();
       document.getElementById('fw').textContent = d.fw || '-';
       document.getElementById('sn').textContent = d.sn || '-';
