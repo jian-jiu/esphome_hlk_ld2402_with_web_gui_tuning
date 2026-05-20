@@ -50,7 +50,7 @@ void LD2402Component::setup() {
         ESP_LOGI(TAG, "SN: %s", sn.c_str());
     });
 
-    if (work_mode_sensor_) work_mode_sensor_->publish_state("Normal");
+    if (work_mode_sensor_) work_mode_sensor_->publish_state("正常");
 }
 
 void LD2402Component::loop() {
@@ -737,8 +737,36 @@ void LD2402Component::handleRequest(AsyncWebServerRequest *request) {
     }
 }
 
+void LD2402Component::handleBody(AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index,
+                                 size_t total) {
+#ifndef USE_ESP32
+    if (request->method() != HTTP_POST || total == 0 || total > 2048)
+        return;
+    if (index == 0 && request->_tempObject == nullptr) {
+        request->_tempObject = calloc(total + 1, sizeof(uint8_t));
+        if (request->_tempObject == nullptr) {
+            request->abort();
+            return;
+        }
+    }
+    if (request->_tempObject != nullptr) {
+        auto *buffer = static_cast<uint8_t *>(request->_tempObject);
+        memcpy(buffer + index, data, len);
+    }
+#endif
+}
+
 void LD2402Component::handle_web_root_(AsyncWebServerRequest *request) {
-    request->send(200, "text/html; charset=utf-8", LD2402_WEB_HTML);
+#ifdef USE_ESP8266
+    AsyncWebServerResponse *response =
+        request->beginResponse_P(200, "text/html; charset=utf-8", reinterpret_cast<const uint8_t *>(LD2402_WEB_HTML),
+                                 LD2402_WEB_HTML_SIZE);
+#else
+    AsyncWebServerResponse *response = request->beginResponse(
+        200, "text/html; charset=utf-8", reinterpret_cast<const uint8_t *>(LD2402_WEB_HTML), LD2402_WEB_HTML_SIZE);
+#endif
+    response->addHeader(ESPHOME_F("Cache-Control"), ESPHOME_F("no-cache"));
+    request->send(response);
 }
 
 void LD2402Component::handle_web_info_(AsyncWebServerRequest *request) {
@@ -791,7 +819,9 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
 #ifdef USE_ESP32
     body = request->arg("plain");
 #else
-    body = request->arg(ESPHOME_F("plain")).c_str();
+    if (request->_tempObject != nullptr) {
+        body = static_cast<const char *>(request->_tempObject);
+    }
 #endif
     if (body.empty()) {
         request->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");

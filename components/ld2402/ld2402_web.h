@@ -1,9 +1,11 @@
 #pragma once
 
+#include "esphome/core/progmem.h"
+
 namespace esphome {
 namespace ld2402 {
 
-const char LD2402_WEB_HTML[] = R"HTMLEOF(
+const char LD2402_WEB_HTML[] PROGMEM = R"HTMLEOF(
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
