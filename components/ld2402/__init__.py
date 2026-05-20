@@ -3,8 +3,8 @@ import esphome.config_validation as cv
 from esphome.components import uart
 from esphome.const import CONF_ID
 
-DEPENDENCIES = ["uart", "network"] 
-AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor"]
+DEPENDENCIES = ["uart", "network"]
+AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor", "web_server_base"]
 MULTI_CONF = False
 
 ld2402_ns = cg.esphome_ns.namespace("ld2402")

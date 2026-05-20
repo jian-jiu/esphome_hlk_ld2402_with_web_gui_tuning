@@ -6,8 +6,8 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/network/util.h"
+#include "esphome/components/web_server_base/web_server_base.h"
 
-#include <esp_http_server.h>
 #include <vector>
 #include <deque>
 #include <memory>
@@ -52,14 +52,8 @@ struct CmdQueueItem {
     uint32_t timeout_ms{1000};
 };
 
-// ─── SSE 客户端 ─────────────────────────────────────────────────
-struct SseClient {
-    httpd_handle_t handle;
-    int fd;
-};
-
 // ─── 主组件类 ───────────────────────────────────────────────────
-class LD2402Component : public Component, public uart::UARTDevice {
+class LD2402Component : public Component, public uart::UARTDevice, public AsyncWebHandler {
 public:
     void setup() override;
     void loop() override;
@@ -102,9 +96,8 @@ public:
     uint32_t get_max_distance_gates() const { return max_distance_gates_; }
     uint32_t get_absence_timeout()    const { return absence_timeout_; }
 
-    // SSE 客户端管理
-    void add_sse_client(httpd_handle_t h, int fd);
-    void remove_sse_client(int fd);
+    bool canHandle(AsyncWebServerRequest *request) const override;
+    void handleRequest(AsyncWebServerRequest *request) override;
 
 private:
     // UART
@@ -128,14 +121,10 @@ private:
     void on_ack_(const std::vector<uint8_t> &data);
 
     // Web 服务器
-    void start_web_server_();
-    void push_sse_energy_();
-    bool check_basic_auth_(httpd_req_t *req);
-
-    static esp_err_t handle_root_(httpd_req_t *req);
-    static esp_err_t handle_api_info_(httpd_req_t *req);
-    static esp_err_t handle_api_cmd_(httpd_req_t *req);
-    static esp_err_t handle_sse_(httpd_req_t *req);
+    void register_web_handler_();
+    void handle_web_root_(AsyncWebServerRequest *request);
+    void handle_web_info_(AsyncWebServerRequest *request);
+    void handle_web_cmd_(AsyncWebServerRequest *request);
 
     // ── 成员变量 ─────────────────────────────────────────────────
     uint16_t web_port_{8080};
@@ -165,9 +154,6 @@ private:
     std::unique_ptr<CmdQueueItem>     cmd_in_flight_;    // unique_ptr，非 bool
     uint32_t cmd_sent_ms_{0};
 
-    httpd_handle_t httpd_{nullptr};
-    std::vector<SseClient> sse_clients_;
-    uint32_t last_sse_ms_{0};
     bool web_started_{false};
 
     std::string firmware_ver_{"unknown"};

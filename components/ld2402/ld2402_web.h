@@ -175,7 +175,7 @@ const EMA_ALPHA = 0.2;  // 平滑系数
 
 let engineerMode = false;
 let currentTab   = 'motion';
-let sseSource    = null;
+let pollTimer    = null;
 
 const thresholds = {
   motion: new Array(NUM_GATES).fill(10000),
@@ -357,35 +357,29 @@ function toggleEngineer() {
   }
 }
 
-// ── SSE ───────────────────────────────────────────────────────
+// ── 状态轮询 ──────────────────────────────────────────────────
 function startSSE() {
-  if (sseSource) sseSource.close();
-  sseSource = new EventSource('/sse');
-  sseSource.onmessage = (e) => {
-    try {
-      const d = JSON.parse(e.data);
-      if (d.connected) return;
-      if (engineerMode) {
-        document.getElementById('dist').textContent = d.dist + ' cm';
-        const present = d.result !== 0;
-        const badge   = document.getElementById('presence-badge');
-        badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
-        badge.className   = 'badge ' + (present ? '' : 'away');
-        updateEnergyBars(d);
-      }
-    } catch(err) {}
-  };
-  sseSource.onerror = () => {
-    log('SSE 连接断开，5s后重连...');
-    stopSSE();
-    setTimeout(() => { if (engineerMode) startSSE(); }, 5000);
-  };
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchState, engineerMode ? 250 : 1000);
 }
 
-function stopSSE()  { if (sseSource) { sseSource.close(); sseSource = null; } }
-function pauseSSE() { if (sseSource) { sseSource.close(); sseSource = null; } }
+function stopSSE()  { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
+function pauseSSE() { stopSSE(); }
 function resumeSSE(delayMs = 800) {
   setTimeout(() => { if (engineerMode) startSSE(); }, delayMs);
+}
+
+async function fetchState() {
+  try {
+    const res = await fetch('/test/api/info');
+    const d = await res.json();
+    document.getElementById('dist').textContent = d.dist + ' cm';
+    const present = d.result !== 0;
+    const badge = document.getElementById('presence-badge');
+    badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
+    badge.className = 'badge ' + (present ? '' : 'away');
+    updateEnergyBars(d);
+  } catch(err) {}
 }
 
 // ── 基本配置 ──────────────────────────────────────────────────
@@ -415,7 +409,7 @@ async function saveFlash() {
   log('正在保存到 Flash...');
   pauseSSE();
   try {
-    const res = await fetch('/api/cmd', {
+    const res = await fetch('/test/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd: 'save_flash' })
@@ -447,7 +441,7 @@ let progressTimer = null;
 function queryProgress() {
   if (progressTimer) clearInterval(progressTimer);
   progressTimer = setInterval(async () => {
-    const res = await fetch('/api/cmd', {
+      const res = await fetch('/test/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd: 'auto_progress' })
@@ -467,7 +461,7 @@ function queryProgress() {
 // ── 通用 API ──────────────────────────────────────────────────
 async function apiCmd(cmd, extra = {}) {
   try {
-    const res = await fetch('/api/cmd', {
+      const res = await fetch('/test/api/cmd', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd, ...extra })
@@ -485,7 +479,7 @@ async function fetchInfo() {
   await apiCmd('read_info');
   setTimeout(async () => {
     try {
-      const res = await fetch('/api/info');
+      const res = await fetch('/test/api/info');
       const d   = await res.json();
       document.getElementById('fw').textContent = d.fw || '-';
       document.getElementById('sn').textContent = d.sn || '-';

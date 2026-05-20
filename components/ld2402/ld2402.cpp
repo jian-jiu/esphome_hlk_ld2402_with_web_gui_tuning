@@ -2,8 +2,6 @@
 #include "ld2402_web.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include <esp_http_server.h>
-#include <mbedtls/base64.h>
 #include <cstring>
 #include <algorithm>
 #include <sstream>
@@ -38,7 +36,8 @@ static std::vector<uint8_t> build_frame(uint16_t cmd,
 // ═══════════════════════════════════════════════════════════════════
 
 void LD2402Component::setup() {
-    ESP_LOGI(TAG, "LD2402 setup, web port %u", web_port_);
+    ESP_LOGI(TAG, "LD2402 setup");
+    register_web_handler_();
 
     cmd_read_firmware([this](const std::string &ver) {
         firmware_ver_ = ver;
@@ -55,11 +54,6 @@ void LD2402Component::setup() {
 }
 
 void LD2402Component::loop() {
-    if (!web_started_ && network::is_connected()) {
-        start_web_server_();
-        web_started_ = true;
-    }
-
     process_rx_();
     pump_cmd_queue_();
 }
@@ -421,7 +415,8 @@ void LD2402Component::cmd_set_engineer_mode(
                 parse_state_   = ParseState::IDLE;
                 line_buf_.clear();
                 if (work_mode_sensor_)
-                    work_mode_sensor_->publish_state(enable ? "Engineer" : "Normal");
+                    // work_mode_sensor_->publish_state(enable ? "Engineer" : "Normal");
+                    work_mode_sensor_->publish_state(enable ? "工程" : "正常");
             }
             cb(ok);
 
@@ -695,129 +690,72 @@ void LD2402Component::cmd_read_param(uint16_t id,
 }
 
 // ═══════════════════════════════════════════════════════════════════
-//  SSE 客户端管理
+//  Web 服务器（使用 ESPHome 内置 web_server_base）
 // ═══════════════════════════════════════════════════════════════════
 
-void LD2402Component::add_sse_client(httpd_handle_t h, int fd) {
-    sse_clients_.push_back({h, fd});
-    ESP_LOGI(TAG, "SSE client connected fd=%d total=%d",
-             fd, (int)sse_clients_.size());
+void LD2402Component::register_web_handler_() {
+    if (web_started_) return;
+    if (web_server_base::global_web_server_base == nullptr) {
+        ESP_LOGW(TAG, "ESPHome web server is not available; LD2402 web UI disabled");
+        return;
+    }
+    web_server_base::global_web_server_base->init();
+    web_server_base::global_web_server_base->add_handler(this);
+    web_started_ = true;
+    ESP_LOGI(TAG, "LD2402 web UI registered at /test");
 }
 
-void LD2402Component::remove_sse_client(int fd) {
-    sse_clients_.erase(
-        std::remove_if(sse_clients_.begin(), sse_clients_.end(),
-                       [fd](const SseClient &c) { return c.fd == fd; }),
-        sse_clients_.end());
-}
-
-void LD2402Component::push_sse_energy_() {
-    if (sse_clients_.empty()) return;
-
-    char buf[1024];
-    int off = snprintf(buf, sizeof(buf),
-        "data:{\"result\":%d,\"dist\":%d,\"motion\":[",
-        detection_result_, target_distance_);
-
-    for (int i = 0; i < NUM_GATES; i++) {
-        off += snprintf(buf + off, sizeof(buf) - off,
-                        "%.2f%s", raw_to_db(motion_energy_[i]),
-                        i < NUM_GATES - 1 ? "," : "");
-    }
-    off += snprintf(buf + off, sizeof(buf) - off, "],\"micro\":[");
-    for (int i = 0; i < NUM_GATES; i++) {
-        off += snprintf(buf + off, sizeof(buf) - off,
-                        "%.2f%s", raw_to_db(micro_energy_[i]),
-                        i < NUM_GATES - 1 ? "," : "");
-    }
-    off += snprintf(buf + off, sizeof(buf) - off, "]}\n\n");
-
-    std::vector<int> dead;
-    for (auto &c : sse_clients_) {
-        int ret = httpd_socket_send(c.handle, c.fd, buf, off, 0);
-        if (ret < 0) dead.push_back(c.fd);
-    }
-    for (int fd : dead) remove_sse_client(fd);
-}
-
-// ═══════════════════════════════════════════════════════════════════
-//  Web 服务器
-// ═══════════════════════════════════════════════════════════════════
-
-bool LD2402Component::check_basic_auth_(httpd_req_t *req) {
-    auto send_401 = [](httpd_req_t *r) {
-        httpd_resp_set_status(r, "401 Unauthorized");
-        httpd_resp_set_type(r, "text/plain");
-        httpd_resp_set_hdr(r, "WWW-Authenticate", "Basic realm=\"LD2402 Radar\"");
-        httpd_resp_sendstr(r, "Unauthorized");
-    };
-
-    char auth_buf[300] = {0};
-    esp_err_t ret = httpd_req_get_hdr_value_str(req, "Authorization",
-                                                 auth_buf, sizeof(auth_buf));
-    if (ret != ESP_OK) { send_401(req); return false; }
-
-    if (strncmp(auth_buf, "Basic ", 6) != 0) { send_401(req); return false; }
-
-    const char *b64 = auth_buf + 6;
-    size_t b64_len  = strlen(b64);
-    while (b64_len > 0 && (b64[b64_len-1] == '\r' ||
-                            b64[b64_len-1] == '\n' ||
-                            b64[b64_len-1] == ' ')) {
-        b64_len--;
-    }
-
-    unsigned char decoded[150] = {0};
-    size_t olen = 0;
-    if (mbedtls_base64_decode(decoded, sizeof(decoded) - 1, &olen,
-                               (const unsigned char *)b64, b64_len) != 0) {
-        send_401(req);
+bool LD2402Component::canHandle(AsyncWebServerRequest *request) const {
+    if (request->method() != HTTP_GET && request->method() != HTTP_POST)
         return false;
-    }
-    decoded[olen] = '\0';
-
-    char expected[130] = {0};
-    snprintf(expected, sizeof(expected), "%s:%s",
-             web_user_.c_str(), web_pass_.c_str());
-
-    if (strcmp((char *)decoded, expected) != 0) {
-        ESP_LOGW(TAG, "Auth failed: got '%s'", (char *)decoded);
-        send_401(req);
-        return false;
-    }
-    return true;
+#ifdef USE_ESP32
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    std::string url(request->url_to(url_buf));
+    return url == "/test" || url == "/test/" || url == "/test/api/info" || url == "/test/api/cmd";
+#else
+    String url = request->url();
+    return url == ESPHOME_F("/test") || url == ESPHOME_F("/test/") || url == ESPHOME_F("/test/api/info") ||
+           url == ESPHOME_F("/test/api/cmd");
+#endif
 }
 
-esp_err_t LD2402Component::handle_root_(httpd_req_t *req) {
-    auto *self = (LD2402Component *)req->user_ctx;
-    if (!self->check_basic_auth_(req)) return ESP_OK;
-
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    extern const char LD2402_WEB_HTML[];
-    extern const size_t LD2402_WEB_HTML_SIZE;
-    httpd_resp_send(req, LD2402_WEB_HTML, LD2402_WEB_HTML_SIZE);
-    return ESP_OK;
+void LD2402Component::handleRequest(AsyncWebServerRequest *request) {
+#ifdef USE_ESP32
+    char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
+    std::string url(request->url_to(url_buf));
+#else
+    String url = request->url();
+#endif
+    if (request->method() == HTTP_GET && (url == "/test" || url == "/test/")) {
+        this->handle_web_root_(request);
+    } else if (request->method() == HTTP_GET && url == "/test/api/info") {
+        this->handle_web_info_(request);
+    } else if (request->method() == HTTP_POST && url == "/test/api/cmd") {
+        this->handle_web_cmd_(request);
+    } else {
+        request->send(404, "text/plain", "Not found");
+    }
 }
 
-esp_err_t LD2402Component::handle_api_info_(httpd_req_t *req) {
-    auto *self = (LD2402Component *)req->user_ctx;
-    if (!self->check_basic_auth_(req)) return ESP_OK;
+void LD2402Component::handle_web_root_(AsyncWebServerRequest *request) {
+    request->send(200, "text/html; charset=utf-8", LD2402_WEB_HTML);
+}
 
+void LD2402Component::handle_web_info_(AsyncWebServerRequest *request) {
     char buf[512];
     snprintf(buf, sizeof(buf),
         "{\"fw\":\"%s\",\"sn\":\"%s\","
         "\"engineer\":%s,\"result\":%d,\"dist\":%d,"
         "\"motion_th\":[",
-        self->firmware_ver_.c_str(), self->sn_str_.c_str(),
-        self->engineer_mode_ ? "true" : "false",
-        self->detection_result_, self->target_distance_);
+        this->firmware_ver_.c_str(), this->sn_str_.c_str(),
+        this->engineer_mode_ ? "true" : "false",
+        this->detection_result_, this->target_distance_);
 
     std::string json(buf);
     for (int i = 0; i < NUM_GATES; i++) {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%u%s",
-                 self->motion_thresholds_[i],
+                 this->motion_thresholds_[i],
                  i < NUM_GATES - 1 ? "," : "");
         json += tmp;
     }
@@ -825,33 +763,42 @@ esp_err_t LD2402Component::handle_api_info_(httpd_req_t *req) {
     for (int i = 0; i < NUM_GATES; i++) {
         char tmp[32];
         snprintf(tmp, sizeof(tmp), "%u%s",
-                 self->micro_thresholds_[i],
+                 this->micro_thresholds_[i],
                  i < NUM_GATES - 1 ? "," : "");
         json += tmp;
     }
-    json += "],\"max_distance\":" + std::to_string(self->max_distance_gates_)
-          + ",\"timeout\":"       + std::to_string(self->absence_timeout_) + "}";
+    json += "],\"motion\":[";
+    for (int i = 0; i < NUM_GATES; i++) {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%.2f%s", raw_to_db(this->motion_energy_[i]), i < NUM_GATES - 1 ? "," : "");
+        json += tmp;
+    }
+    json += "],\"micro\":[";
+    for (int i = 0; i < NUM_GATES; i++) {
+        char tmp[32];
+        snprintf(tmp, sizeof(tmp), "%.2f%s", raw_to_db(this->micro_energy_[i]), i < NUM_GATES - 1 ? "," : "");
+        json += tmp;
+    }
+    json += "],\"max_distance\":" + std::to_string(this->max_distance_gates_)
+          + ",\"timeout\":"       + std::to_string(this->absence_timeout_) + "}";
 
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json.c_str(), json.size());
-    return ESP_OK;
+    request->send(200, "application/json", json.c_str());
 }
 
 
-esp_err_t LD2402Component::handle_api_cmd_(httpd_req_t *req) {
-    auto *self = (LD2402Component *)req->user_ctx;
-    if (!self->check_basic_auth_(req)) return ESP_OK;
-
-    char body[1024] = {0};
-    int ret = httpd_req_recv(req, body, sizeof(body) - 1);
-    if (ret <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
-        return ESP_OK;
+void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
+    std::string body;
+#ifdef USE_ESP32
+    body = request->arg("plain");
+#else
+    body = request->arg(ESPHOME_F("plain")).c_str();
+#endif
+    if (body.empty()) {
+        request->send(400, "application/json", "{\"ok\":false,\"error\":\"No body\"}");
+        return;
     }
-    body[ret] = 0;
 
-    auto get_str_val = [](const char *json, const char *key) -> std::string {
-        std::string s(json);
+    auto get_str_val = [](const std::string &s, const char *key) -> std::string {
         std::string k = std::string("\"") + key + "\":\"";
         auto pos = s.find(k);
         if (pos == std::string::npos) return "";
@@ -860,8 +807,7 @@ esp_err_t LD2402Component::handle_api_cmd_(httpd_req_t *req) {
         if (end == std::string::npos) return "";
         return s.substr(pos, end - pos);
     };
-    auto get_num_val = [](const char *json, const char *key) -> double {
-        std::string s(json);
+    auto get_num_val = [](const std::string &s, const char *key) -> double {
         std::string k = std::string("\"") + key + "\":";
         auto pos = s.find(k);
         if (pos == std::string::npos) return 0;
@@ -870,169 +816,80 @@ esp_err_t LD2402Component::handle_api_cmd_(httpd_req_t *req) {
     };
 
     std::string cmd = get_str_val(body, "cmd");
-    httpd_resp_set_type(req, "application/json");
 
     if (cmd == "set_engineer") {
         bool enable = get_num_val(body, "value") != 0;
-        self->cmd_set_engineer_mode(enable, [](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_set_engineer_mode(enable, [](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "read_thresholds") {
         bool micro = get_num_val(body, "micro") != 0;
-        self->cmd_read_gate_thresholds(micro, [](const std::vector<uint32_t>&) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_read_gate_thresholds(micro, [](const std::vector<uint32_t>&) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "write_threshold") {
         bool     micro = get_num_val(body, "micro") != 0;
         int      gate  = (int)get_num_val(body, "gate");
         uint32_t raw   = (uint32_t)get_num_val(body, "value");
-        self->cmd_write_gate_threshold(micro, (uint8_t)gate, raw, [](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_write_gate_threshold(micro, (uint8_t)gate, raw, [](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "auto_threshold") {
         uint16_t trig  = (uint16_t)get_num_val(body, "trig");
         uint16_t hold  = (uint16_t)get_num_val(body, "hold");
         uint16_t micro = (uint16_t)get_num_val(body, "micro");
-        self->cmd_auto_threshold(trig, hold, micro, [](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_auto_threshold(trig, hold, micro, [](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "auto_progress") {
-        httpd_resp_sendstr(req, "{\"ok\":true,\"progress\":0}");
+        request->send(200, "application/json", "{\"ok\":true,\"progress\":0}");
 
     } else if (cmd == "auto_gain") {
-        self->cmd_auto_gain([](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_auto_gain([](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "save_flash") {
-        self->cmd_save_params([](bool ok) {
+        this->cmd_save_params([](bool ok) {
             ESP_LOGI("ld2402", "Flash save result: %s", ok ? "OK" : "FAIL");
         });
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "set_max_distance") {
         uint32_t gates = (uint32_t)get_num_val(body, "value");
         gates = std::min((uint32_t)16, std::max((uint32_t)1, gates));
-        self->max_distance_gates_ = gates;
+        this->max_distance_gates_ = gates;
         // ✅ 每门 0.7m，转换为 0.1m 单位（×7），上限 100
         uint32_t param_val = gates * 7;
         if (param_val > 100) param_val = 100;
-        self->cmd_write_params_batch({{0x0001, param_val}}, [](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_write_params_batch({{0x0001, param_val}}, [](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
     } else if (cmd == "set_timeout") {
         uint32_t secs = (uint32_t)get_num_val(body, "value");
         secs = std::min((uint32_t)3600, std::max((uint32_t)0, secs));
-        self->absence_timeout_ = secs;
-        self->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->absence_timeout_ = secs;
+        this->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
+        request->send(200, "application/json", "{\"ok\":true}");
 
 
     } else if (cmd == "read_info") {
-        self->cmd_read_firmware([self](const std::string &ver) {
-            self->firmware_ver_ = ver;
-            if (self->firmware_sensor_) self->firmware_sensor_->publish_state(ver);
+        this->cmd_read_firmware([this](const std::string &ver) {
+            this->firmware_ver_ = ver;
+            if (this->firmware_sensor_) this->firmware_sensor_->publish_state(ver);
         });
-        self->cmd_read_sn([self](const std::string &sn) { self->sn_str_ = sn; });
-        self->cmd_read_gate_thresholds(false, [](const std::vector<uint32_t>&) {});
-        self->cmd_read_gate_thresholds(true,  [](const std::vector<uint32_t>&) {});
-        self->cmd_read_param(0x0001, [self](uint32_t v) {
-            if (v >= 7 && v <= 100) self->max_distance_gates_ = v / 7;
+        this->cmd_read_sn([this](const std::string &sn) { this->sn_str_ = sn; });
+        this->cmd_read_gate_thresholds(false, [](const std::vector<uint32_t>&) {});
+        this->cmd_read_gate_thresholds(true,  [](const std::vector<uint32_t>&) {});
+        this->cmd_read_param(0x0001, [this](uint32_t v) {
+            if (v >= 7 && v <= 100) this->max_distance_gates_ = v / 7;
         });
-        self->cmd_read_param(0x0004, [self](uint32_t v) { self->absence_timeout_ = v; });
-        httpd_resp_sendstr(req, "{\"ok\":true}");
+        this->cmd_read_param(0x0004, [this](uint32_t v) { this->absence_timeout_ = v; });
+        request->send(200, "application/json", "{\"ok\":true}");
 
 
     } else {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown command");
+        request->send(400, "application/json", "{\"ok\":false,\"error\":\"Unknown command\"}");
     }
-    return ESP_OK;
-}
-
-esp_err_t LD2402Component::handle_sse_(httpd_req_t *req) {
-    auto *self = (LD2402Component *)req->user_ctx;
-    if (!self->check_basic_auth_(req)) return ESP_OK;
-
-    httpd_resp_set_type(req, "text/event-stream");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
-    httpd_resp_set_hdr(req, "Connection", "keep-alive");
-    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-
-    const char *hello = "data:{\"connected\":true}\n\n";
-    if (httpd_resp_send_chunk(req, hello, strlen(hello)) != ESP_OK) {
-        return ESP_OK;
-    }
-    ESP_LOGI(TAG, "SSE client connected");
-
-    while (true) {
-        if (self->engineer_mode_) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-
-            char buf[1100];
-            int len = snprintf(buf, sizeof(buf),
-                "data:{\"result\":%d,\"dist\":%d,\"motion\":[",
-                self->detection_result_, self->target_distance_);
-
-            for (int i = 0; i < NUM_GATES; i++) {
-                len += snprintf(buf + len, sizeof(buf) - len,
-                    "%.2f%s", raw_to_db(self->motion_energy_[i]),
-                    i < NUM_GATES - 1 ? "," : "");
-            }
-            len += snprintf(buf + len, sizeof(buf) - len, "],\"micro\":[");
-            for (int i = 0; i < NUM_GATES; i++) {
-                len += snprintf(buf + len, sizeof(buf) - len,
-                    "%.2f%s", raw_to_db(self->micro_energy_[i]),
-                    i < NUM_GATES - 1 ? "," : "");
-            }
-            len += snprintf(buf + len, sizeof(buf) - len, "]}\n\n");
-
-            if (httpd_resp_send_chunk(req, buf, len) != ESP_OK) {
-                ESP_LOGI(TAG, "SSE client disconnected");
-                break;
-            }
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(500));
-
-            char buf[128];
-            int len = snprintf(buf, sizeof(buf),
-                "data:{\"result\":%d,\"dist\":%d}\n\n",
-                self->detection_result_, self->target_distance_);
-
-            if (httpd_resp_send_chunk(req, buf, len) != ESP_OK) {
-                ESP_LOGI(TAG, "SSE client disconnected");
-                break;
-            }
-        }
-    }
-
-    httpd_resp_send_chunk(req, NULL, 0);
-    return ESP_OK;
-}
-
-void LD2402Component::start_web_server_() {
-    httpd_config_t config    = HTTPD_DEFAULT_CONFIG();
-    config.server_port       = web_port_;
-    config.ctrl_port         = web_port_ + 1;
-    config.max_open_sockets  = 9;
-    config.lru_purge_enable  = true;
-    config.stack_size        = 10240;
-    config.task_priority     = tskIDLE_PRIORITY + 5;
-
-    if (httpd_start(&httpd_, &config) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start httpd");
-        return;
-    }
-
-    httpd_uri_t uris[] = {
-        {"/",         HTTP_GET,  handle_root_,      this},
-        {"/api/info", HTTP_GET,  handle_api_info_,  this},
-        {"/api/cmd",  HTTP_POST, handle_api_cmd_,   this},
-        {"/sse",      HTTP_GET,  handle_sse_,        this},
-    };
-    for (auto &u : uris) {
-        httpd_register_uri_handler(httpd_, &u);
-    }
-
-    ESP_LOGI(TAG, "Web server started on port %u", web_port_);
 }
 
 }  // namespace ld2402
