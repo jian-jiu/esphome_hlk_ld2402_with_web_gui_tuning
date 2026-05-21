@@ -56,6 +56,16 @@ void LD2402Component::setup() {
 void LD2402Component::loop() {
     process_rx_();
     pump_cmd_queue_();
+#if !defined(USE_ESP32) && defined(USE_ARDUINO)
+    if (this->sse_.count() > 0) {
+        const uint32_t now = millis();
+        const uint32_t interval_ms = this->engineer_mode_ ? 200 : 500;
+        if (now - this->last_sse_ms_ >= interval_ms) {
+            this->last_sse_ms_ = now;
+            this->push_sse_update_();
+        }
+    }
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -322,9 +332,7 @@ void LD2402Component::pump_cmd_queue_() {
 //  公开命令接口
 // ═══════════════════════════════════════════════════════════════════
 
-void LD2402Component::cmd_read_firmware(
-        std::function<void(const std::string&)> cb) {
-
+void LD2402Component::cmd_read_firmware(std::function<void(const std::string&)> cb) {
     CmdQueueItem en;
     uint8_t en_val[] = {0x01, 0x00};
     en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
@@ -693,15 +701,50 @@ void LD2402Component::cmd_read_param(uint16_t id,
 // ═══════════════════════════════════════════════════════════════════
 
 void LD2402Component::register_web_handler_() {
+    if (this->web_registered_)
+        return;
     if (web_server_base::global_web_server_base == nullptr) {
         ESP_LOGW(TAG, "ESPHome web server is not available; LD2402 web UI disabled");
         return;
     }
     web_server_base::global_web_server_base->init();
+#if !defined(USE_ESP32) && defined(USE_ARDUINO)
+    this->sse_.onConnect([](AsyncEventSourceClient *client) { client->send("{\"connected\":true}"); });
+    web_server_base::global_web_server_base->add_handler(&this->sse_);
+#endif
     web_server_base::global_web_server_base->add_handler(this);
     ESP_LOGI(TAG, "LD2402 web UI registered at /config");
+    this->web_registered_ = true;
 }
 
+#if !defined(USE_ESP32) && defined(USE_ARDUINO)
+void LD2402Component::push_sse_update_() {
+    if (this->engineer_mode_) {
+        char buf[1100];
+        int len = snprintf(buf, sizeof(buf),
+            "{\"result\":%d,\"dist\":%d,\"motion\":[",
+            this->detection_result_, this->target_distance_);
+
+        for (int i = 0; i < NUM_GATES; i++) {
+            len += snprintf(buf + len, sizeof(buf) - len,
+                "%.2f%s", raw_to_db(this->motion_energy_[i]),
+                i < NUM_GATES - 1 ? "," : "");
+        }
+        len += snprintf(buf + len, sizeof(buf) - len, "],\"micro\":[");
+        for (int i = 0; i < NUM_GATES; i++) {
+            len += snprintf(buf + len, sizeof(buf) - len,
+                "%.2f%s", raw_to_db(this->micro_energy_[i]),
+                i < NUM_GATES - 1 ? "," : "");
+        }
+        len += snprintf(buf + len, sizeof(buf) - len, "]}");
+        this->sse_.send(buf);
+    } else {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "{\"result\":%d,\"dist\":%d}", this->detection_result_, this->target_distance_);
+        this->sse_.send(buf);
+    }
+}
+#endif
 bool LD2402Component::canHandle(AsyncWebServerRequest *request) const {
     if (request->method() != HTTP_GET && request->method() != HTTP_POST)
         return false;
@@ -810,7 +853,6 @@ void LD2402Component::handle_web_info_(AsyncWebServerRequest *request) {
     request->send(200, "application/json", json.c_str());
 }
 
-
 void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
     std::string body;
 #ifdef USE_ESP32
@@ -898,7 +940,6 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
         this->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
         request->send(200, "application/json", "{\"ok\":true}");
 
-
     } else if (cmd == "read_info") {
         this->cmd_read_firmware([this](const std::string &ver) {
             this->firmware_ver_ = ver;
@@ -912,7 +953,6 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
         });
         this->cmd_read_param(0x0004, [this](uint32_t v) { this->absence_timeout_ = v; });
         request->send(200, "application/json", "{\"ok\":true}");
-
 
     } else {
         request->send(400, "application/json", "{\"ok\":false,\"error\":\"Unknown command\"}");

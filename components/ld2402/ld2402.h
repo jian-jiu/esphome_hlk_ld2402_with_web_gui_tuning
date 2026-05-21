@@ -121,6 +121,9 @@ private:
     void handle_web_root_(AsyncWebServerRequest *request);
     void handle_web_info_(AsyncWebServerRequest *request);
     void handle_web_cmd_(AsyncWebServerRequest *request);
+#if !defined(USE_ESP32) && defined(USE_ARDUINO)
+    void push_sse_update_();
+#endif
 
     binary_sensor::BinarySensor *presence_sensor_{nullptr};
     sensor::Sensor               *distance_sensor_{nullptr};
@@ -144,6 +147,12 @@ private:
     std::deque<CmdQueueItem>          cmd_queue_;        // deque，支持 pop_front
     std::unique_ptr<CmdQueueItem>     cmd_in_flight_;    // unique_ptr，非 bool
     uint32_t cmd_sent_ms_{0};
+
+#if !defined(USE_ESP32) && defined(USE_ARDUINO)
+    AsyncEventSource sse_{"/config/sse"};
+    uint32_t last_sse_ms_{0};
+#endif
+    bool web_registered_{false};
 
     std::string firmware_ver_{"unknown"};
     std::string sn_str_{"unknown"};

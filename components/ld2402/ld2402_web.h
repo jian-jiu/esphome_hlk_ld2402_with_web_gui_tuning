@@ -136,7 +136,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 <div class="card">
   <div class="card-title" style="margin-bottom:10px">操作</div>
   <div class="btn-row">
-    <button class="btn btn-info"    onclick="apiCmd('read_info')">🔄 加载配置</button>
+    <button class="btn btn-info"    onclick="fetchInfo()">🔄 加载配置</button>
     <button class="btn btn-toggle"  id="btn-eng" onclick="toggleEngineer()">⚙️ 工程模式</button>
     <button class="btn btn-success" onclick="apiCmd('auto_gain')">📶 自动增益</button>
     <button class="btn btn-danger"  onclick="saveFlash()">💾 保存到Flash</button>
@@ -177,7 +177,7 @@ const EMA_ALPHA = 0.2;  // 平滑系数
 
 let engineerMode = false;
 let currentTab   = 'motion';
-let pollTimer    = null;
+let sseSource    = null;
 
 const thresholds = {
   motion: new Array(NUM_GATES).fill(10000),
@@ -221,6 +221,7 @@ function init() {
   buildGates('motion');
   buildGates('micro');
   fetchInfo();
+  startSSE();
 }
 
 function buildGates(type) {
@@ -339,10 +340,7 @@ function toggleEngineer() {
   btn.textContent = engineerMode ? '🔬 工程模式 ON' : '⚙️ 工程模式';
   apiCmd('set_engineer', { value: engineerMode ? 1 : 0 });
 
-  if (engineerMode) {
-    startSSE();
-  } else {
-    stopSSE();
+  if (!engineerMode) {
     const badge = document.getElementById('presence-badge');
     badge.textContent = '未知';
     badge.className   = 'badge unknown';
@@ -359,30 +357,32 @@ function toggleEngineer() {
   }
 }
 
-// ── 状态轮询 ──────────────────────────────────────────────────
+// ── SSE ───────────────────────────────────────────────────────
 function startSSE() {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchState, engineerMode ? 250 : 1000);
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource('/config/sse');
+  sseSource.onmessage = (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      if (d.connected) return;
+      document.getElementById('dist').textContent = d.dist + ' cm';
+      const present = d.result !== 0;
+      const badge   = document.getElementById('presence-badge');
+      badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
+      badge.className   = 'badge ' + (present ? '' : 'away');
+      updateEnergyBars(d);
+    } catch(err) {}
+  };
+  sseSource.onerror = () => {
+    log('SSE 连接断开，3s后重连...');
+    stopSSE();
+    setTimeout(() => { if (engineerMode) startSSE(); }, 3000);
+  };
 }
 
-function stopSSE()  { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-function pauseSSE() { stopSSE(); }
-function resumeSSE(delayMs = 800) {
-  setTimeout(() => { if (engineerMode) startSSE(); }, delayMs);
-}
-
-async function fetchState() {
-  try {
-    const res = await fetch('/config/api/info');
-    const d = await res.json();
-    document.getElementById('dist').textContent = d.dist + ' cm';
-    const present = d.result !== 0;
-    const badge = document.getElementById('presence-badge');
-    badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
-    badge.className = 'badge ' + (present ? '' : 'away');
-    updateEnergyBars(d);
-  } catch(err) {}
-}
+function stopSSE()  { if (sseSource) { sseSource.close(); sseSource = null; } }
+function pauseSSE() { if (sseSource) { sseSource.close(); sseSource = null; } }
+function resumeSSE(delayMs = 800) {setTimeout(() => { if (engineerMode) startSSE(); }, delayMs);}
 
 // ── 基本配置 ──────────────────────────────────────────────────
 function updateDistLabel(gates) {
