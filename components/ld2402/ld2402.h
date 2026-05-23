@@ -163,7 +163,7 @@ private:
     std::string firmware_ver_{"unknown"};
     std::string sn_str_{"unknown"};
     uint32_t max_distance_gates_{12};   // 参数 0x0001，默认 12 门（8.4m）
-    uint32_t absence_timeout_{30};      // 参数 0x0004，默认 30 秒
+    uint32_t absence_timeout_{5};      // 参数 0x0004，默认 5 秒
     uint32_t motion_thresholds_[NUM_GATES]{};
     uint32_t micro_thresholds_[NUM_GATES]{};
 };

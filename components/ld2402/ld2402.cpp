@@ -113,7 +113,6 @@ void LD2402Component::process_rx_() {
 
 void LD2402Component::parse_byte_(uint8_t b) {
     switch (parse_state_) {
-
         case ParseState::IDLE:
             hdr_idx_ = 0;
             frame_buf_.clear();
@@ -135,7 +134,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 }
             }
             break;
-
         case ParseState::CMD_HEADER:
             if (b == CMD_HEADER[hdr_idx_]) {
                 hdr_idx_++;
@@ -149,7 +147,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 line_buf_.clear();
             }
             break;
-
         case ParseState::CMD_LENGTH:
             if (frame_recv_ == 0) {
                 frame_len_ = b;
@@ -165,7 +162,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 }
             }
             break;
-
         case ParseState::CMD_DATA:
             frame_buf_.push_back(b);
             frame_recv_++;
@@ -174,7 +170,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 parse_state_ = ParseState::CMD_FOOTER;
             }
             break;
-
         case ParseState::CMD_FOOTER:
             if (b == CMD_FOOTER[hdr_idx_]) {
                 hdr_idx_++;
@@ -186,7 +181,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 parse_state_ = ParseState::IDLE;
             }
             break;
-
         case ParseState::DAT_HEADER:
             if (b == DATA_HEADER[hdr_idx_]) {
                 hdr_idx_++;
@@ -199,7 +193,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 parse_state_ = ParseState::IDLE;
             }
             break;
-
         case ParseState::DAT_LENGTH:
             if (frame_recv_ == 0) {
                 frame_len_ = b;
@@ -211,7 +204,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 parse_state_ = ParseState::DAT_DATA;
             }
             break;
-
         case ParseState::DAT_DATA:
             frame_buf_.push_back(b);
             frame_recv_++;
@@ -220,7 +212,6 @@ void LD2402Component::parse_byte_(uint8_t b) {
                 parse_state_ = ParseState::DAT_FOOTER;
             }
             break;
-
         case ParseState::DAT_FOOTER:
             if (b == DATA_FOOTER[hdr_idx_]) {
                 hdr_idx_++;
@@ -451,12 +442,12 @@ void LD2402Component::cmd_read_gate_thresholds(bool micro,std::function<void(con
                     vals.push_back(v);
                     offset += 4;
                 }
-                if (micro) {
-                    for (int i = 0; i < NUM_GATES && i < (int)vals.size(); i++)
+                for (int i = 0; i < NUM_GATES && i < (int)vals.size(); i++){
+                    if (micro) {
                         micro_thresholds_[i] = vals[i];
-                } else {
-                    for (int i = 0; i < NUM_GATES && i < (int)vals.size(); i++)
+                    } else {
                         motion_thresholds_[i] = vals[i];
+                    }
                 }
                 cb(vals);
             }
@@ -472,6 +463,7 @@ void LD2402Component::cmd_write_gate_threshold(bool micro, uint8_t gate, uint32_
     cmd_write_params_batch(params, cb);
 }
 
+// 5.2.7.配置传感器参数命令：批量写入多个参数，参数格式为 [param_id(2字节), param_value(4字节)]，成功后需要发送保存命令才能生效
 void LD2402Component::cmd_write_params_batch(const std::vector<std::pair<uint16_t,uint32_t>> &params,std::function<void(bool)> cb) {
     std::vector<uint8_t> val;
     for (auto &p : params) {
@@ -489,7 +481,7 @@ void LD2402Component::cmd_write_params_batch(const std::vector<std::pair<uint16_
         wr.is_config_cmd = true;
         wr.timeout_ms    = 2000;
         wr.callback = [this, cb](const std::vector<uint8_t> &d) {
-            bool ok = (d.size() >= 4 && d[2] == 0);
+            bool ok = d.size() >= 4 && d[2] == 0;
             cb(ok);
             // 只退出配置，不保存
             enqueue_end_cmd_();
@@ -552,7 +544,6 @@ void LD2402Component::cmd_auto_progress() {
         ap.payload       = build_frame(CMD_AUTO_PROGRESS);
         ap.is_config_cmd = true;
         ap.callback = [this](const std::vector<uint8_t> &d) {
-            ESP_LOGW(TAG, "Simple %d", (uint16_t)d);
             int progress = 0;
             if (d.size() >= 6 && d[2] == 0)
                 progress = (int)((uint16_t)d[4] | ((uint16_t)d[5] << 8));
@@ -830,7 +821,7 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
         }},
         {"set_max_distance", [&]() {
             uint32_t gates = (uint32_t)get_num_val(body, "value");
-            gates = std::min((uint32_t)16, std::max((uint32_t)1, gates));
+            gates = std::min((uint32_t)17, std::max((uint32_t)1, gates));
             this->max_distance_gates_ = gates;
             uint32_t param_val = gates * 7;
             if (param_val > 100) param_val = 100;
@@ -839,7 +830,7 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
         }},
         {"set_timeout", [&]() {
             uint32_t secs = (uint32_t)get_num_val(body, "value");
-            secs = std::min((uint32_t)3600, std::max((uint32_t)0, secs));
+            secs = std::min((uint32_t)65535, std::max((uint32_t)0, secs));
             this->absence_timeout_ = secs;
             this->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
             send_ok();
