@@ -24,6 +24,7 @@ static const uint8_t CMD_FOOTER[4] = {0x04, 0x03, 0x02, 0x01};
 static const uint8_t DATA_HEADER[4] = {0xF4, 0xF3, 0xF2, 0xF1};
 static const uint8_t DATA_FOOTER[4] = {0xF8, 0xF7, 0xF6, 0xF5};
 
+// 命令字
 static const uint16_t CMD_READ_FW        = 0x0000;
 static const uint16_t CMD_ENABLE_CONFIG  = 0x00FF;
 static const uint16_t CMD_END_CONFIG     = 0x00FE;   // 退出配置
