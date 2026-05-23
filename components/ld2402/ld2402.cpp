@@ -96,6 +96,8 @@ void LD2402Component::send_raw_(const std::vector<uint8_t> &frame) {
 
 // 直接发送 item.payload（已是完整帧）
 void LD2402Component::send_cmd_frame_(const CmdQueueItem &item) {
+    // 发送前先清空接收缓冲区，避免工程模式下数据帧堆积干扰 ACK 接收
+    process_rx_();
     write_array(item.payload.data(), item.payload.size());
 }
 
@@ -308,10 +310,17 @@ void LD2402Component::pump_cmd_queue_() {
     if (cmd_in_flight_) {
         uint32_t elapsed = millis() - cmd_sent_ms_;
         uint32_t timeout = cmd_in_flight_->is_config_cmd
-                         ? 3000
+                         ? 5000
                          : cmd_in_flight_->timeout_ms;
 
         if (elapsed > timeout) {
+            std::string hex;
+            for (uint8_t b : cmd_in_flight_->payload) {
+                char buf[4];
+                snprintf(buf, sizeof(buf), "%02X ", b);
+                hex += buf;
+            }
+            ESP_LOGW(TAG, "Command error, payload: %s", hex.c_str());
             if (cmd_in_flight_->retry_count < 2) {
                 ESP_LOGW(TAG, "Command timeout, retry %d/2", cmd_in_flight_->retry_count + 1);
                 cmd_in_flight_->retry_count++;

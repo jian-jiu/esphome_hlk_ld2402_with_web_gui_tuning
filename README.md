@@ -53,6 +53,7 @@ uart:
   id: uart_ld2402
   tx_pin: GPIO6   #your uart tx pin
   rx_pin: GPIO7  #your uart rx pin
+  rx_buffer_size: 2048 # 根据需要调整缓冲区大小
   baud_rate: 115200
   parity: NONE
   stop_bits: 1
@@ -91,6 +92,10 @@ text_sensor:
 * 访问设备IP:web_port/config,进入调参界面
 * 实时能量需要先开启工程模式，调试完记得关闭工程模式
 * 任何修改都记得保存到flash来持久化
+
+## 已知问题
+* 工程模式下特别容易出现 Command error 现象(导致命令执行失败)m,目前不清楚原因.建议调参时先关闭工程模式,可大幅提高命令成功率
+* 保存配置后 重新 加载或者刷新界面容易导致之前的配置没生效(因为需要加载配置)，实际已生效(也可能因为上面的错误命令已执行失败),需要多刷新几次
 
 ## 开发
 [文档地址](https://h.hlktech.com/Mobile/download/FDetail/318.html)
