@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <unordered_map>
 
 namespace esphome {
 namespace ld2402 {
@@ -16,9 +17,7 @@ static const char *TAG = "ld2402";
 //  工具函数：构建完整命令帧
 // ═══════════════════════════════════════════════════════════════════
 
-static std::vector<uint8_t> build_frame(uint16_t cmd,
-                                         const uint8_t *val = nullptr,
-                                         size_t val_len = 0) {
+static std::vector<uint8_t> build_frame(uint16_t cmd,const uint8_t *val = nullptr,size_t val_len = 0) {
     std::vector<uint8_t> f;
     for (auto b : CMD_HEADER) f.push_back(b);
     uint16_t dlen = 2 + (uint16_t)val_len;
@@ -29,6 +28,25 @@ static std::vector<uint8_t> build_frame(uint16_t cmd,
     for (size_t i = 0; i < val_len; i++) f.push_back(val[i]);
     for (auto b : CMD_FOOTER) f.push_back(b);
     return f;
+}
+
+// 5.2.2.使能配置命令：每次配置前必须先发送，成功后才能继续发送其他配置命令，配置完成后发送结束配置命令退出配置模式
+void LD2402Component::enqueue_enable_cmd_(std::function<void(const std::vector<uint8_t>&)> cb) {
+    CmdQueueItem item;
+    uint8_t val[] = {0x01, 0x00};
+    item.payload       = build_frame(CMD_ENABLE_CONFIG, val, 2);
+    item.is_config_cmd = true;
+    if (cb) item.callback = cb;
+    enqueue_cmd_(item);
+}
+
+// 5.2.2.结束配置命令：退出配置模式
+void LD2402Component::enqueue_end_cmd_() {
+    CmdQueueItem item;
+    item.payload       = build_frame(CMD_END_CONFIG);
+    item.is_config_cmd = true;
+    item.callback      = [](const std::vector<uint8_t>&){};
+    enqueue_cmd_(item);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -304,8 +322,7 @@ void LD2402Component::pump_cmd_queue_() {
 
         if (elapsed > timeout) {
             if (cmd_in_flight_->retry_count < 2) {
-                ESP_LOGW(TAG, "Command timeout, retry %d/2",
-                         cmd_in_flight_->retry_count + 1);
+                ESP_LOGW(TAG, "Command timeout, retry %d/2", cmd_in_flight_->retry_count + 1);
                 cmd_in_flight_->retry_count++;
                 send_cmd_frame_(*cmd_in_flight_);
                 cmd_sent_ms_ = millis();
@@ -333,11 +350,7 @@ void LD2402Component::pump_cmd_queue_() {
 // ═══════════════════════════════════════════════════════════════════
 
 void LD2402Component::cmd_read_firmware(std::function<void(const std::string&)> cb) {
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, cb](const std::vector<uint8_t> &ack) {
+    enqueue_enable_cmd_([this, cb](const std::vector<uint8_t> &ack) {
         if (ack.size() < 4 || ack[2] != 0) return;
 
         CmdQueueItem fw;
@@ -351,25 +364,14 @@ void LD2402Component::cmd_read_firmware(std::function<void(const std::string&)> 
                     cb(ver);
                 }
             }
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(fw);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_read_sn(
-        std::function<void(const std::string&)> cb) {
-
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, cb](const std::vector<uint8_t> &ack) {
+void LD2402Component::cmd_read_sn(std::function<void(const std::string&)> cb) {
+    enqueue_enable_cmd_([this, cb](const std::vector<uint8_t> &ack) {
         if (ack.size() < 4 || ack[2] != 0) return;
 
         CmdQueueItem sn;
@@ -383,25 +385,14 @@ void LD2402Component::cmd_read_sn(
                     cb(s);
                 }
             }
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(sn);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_set_engineer_mode(
-        bool enable, std::function<void(bool)> cb) {
-
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, enable, cb](const std::vector<uint8_t> &ack) {
+void LD2402Component::cmd_set_engineer_mode(bool enable, std::function<void(bool)> cb) {
+    enqueue_enable_cmd_([this, enable, cb](const std::vector<uint8_t> &ack) {
         if (ack.size() < 4 || ack[2] != 0) { cb(false); return; }
 
         uint32_t mode_val = enable ? MODE_ENGINEER : MODE_NORMAL;
@@ -427,21 +418,13 @@ void LD2402Component::cmd_set_engineer_mode(
             }
             cb(ok);
 
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(mode);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_read_gate_thresholds(
-        bool micro,
-        std::function<void(const std::vector<uint32_t>&)> cb) {
-
+void LD2402Component::cmd_read_gate_thresholds(bool micro,std::function<void(const std::vector<uint32_t>&)> cb) {
     uint16_t base = micro ? 0x0030 : 0x0010;
     std::vector<uint8_t> val;
     for (int i = 0; i < NUM_GATES; i++) {
@@ -450,11 +433,7 @@ void LD2402Component::cmd_read_gate_thresholds(
         val.push_back((id >> 8) & 0xFF);
     }
 
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, val, micro, cb](const std::vector<uint8_t>&) {
+    enqueue_enable_cmd_([this, val, micro, cb](const std::vector<uint8_t>&) {
         CmdQueueItem rd;
         rd.payload       = build_frame(CMD_READ_PARAMS, val.data(), val.size());
         rd.is_config_cmd = true;
@@ -481,30 +460,19 @@ void LD2402Component::cmd_read_gate_thresholds(
                 }
                 cb(vals);
             }
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(rd);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_write_gate_threshold(
-        bool micro, uint8_t gate, uint32_t raw_val,
-        std::function<void(bool)> cb) {
-
+void LD2402Component::cmd_write_gate_threshold(bool micro, uint8_t gate, uint32_t raw_val,std::function<void(bool)> cb) {
     uint16_t param_id = (micro ? 0x0030 : 0x0010) + gate;
     std::vector<std::pair<uint16_t, uint32_t>> params = {{param_id, raw_val}};
     cmd_write_params_batch(params, cb);
 }
 
-void LD2402Component::cmd_write_params_batch(
-        const std::vector<std::pair<uint16_t,uint32_t>> &params,
-        std::function<void(bool)> cb) {
-
+void LD2402Component::cmd_write_params_batch(const std::vector<std::pair<uint16_t,uint32_t>> &params,std::function<void(bool)> cb) {
     std::vector<uint8_t> val;
     for (auto &p : params) {
         val.push_back(p.first & 0xFF);
@@ -515,11 +483,7 @@ void LD2402Component::cmd_write_params_batch(
         val.push_back((p.second >> 24) & 0xFF);
     }
 
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, val, cb](const std::vector<uint8_t>&) {
+    enqueue_enable_cmd_([this, val, cb](const std::vector<uint8_t>&) {
         CmdQueueItem wr;
         wr.payload       = build_frame(CMD_WRITE_PARAMS, val.data(), val.size());
         wr.is_config_cmd = true;
@@ -528,33 +492,19 @@ void LD2402Component::cmd_write_params_batch(
             bool ok = (d.size() >= 4 && d[2] == 0);
             cb(ok);
             // 只退出配置，不保存
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         wr.on_timeout = [this, cb]() {
             ESP_LOGW(TAG, "Write params timeout");
             cb(false);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(wr);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-
 void LD2402Component::cmd_save_params(std::function<void(bool)> cb) {
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, cb](const std::vector<uint8_t> &ack) {
+    enqueue_enable_cmd_([this, cb](const std::vector<uint8_t> &ack) {
         if (ack.size() < 4 || ack[2] != 0) { cb(false); return; }
 
         CmdQueueItem save;
@@ -565,36 +515,19 @@ void LD2402Component::cmd_save_params(std::function<void(bool)> cb) {
             bool ok = (d.size() >= 4 && d[2] == 0);
             ESP_LOGI(TAG, "Save to flash %s", ok ? "OK" : "FAIL");
             cb(ok);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         save.on_timeout = [this, cb]() {
             ESP_LOGW(TAG, "Save to flash timeout");
             cb(false);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(save);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-
-void LD2402Component::cmd_auto_threshold(
-        uint16_t trig, uint16_t hold, uint16_t micro_coeff,
-        std::function<void(bool)> cb) {
-
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, trig, hold, micro_coeff, cb](const std::vector<uint8_t>&) {
+void LD2402Component::cmd_auto_threshold(uint16_t trig, uint16_t hold, uint16_t micro_coeff,std::function<void(bool)> cb) {
+    enqueue_enable_cmd_([this, trig, hold, micro_coeff, cb](const std::vector<uint8_t>&) {
         uint8_t val[6] = {
             (uint8_t)(trig & 0xFF),        (uint8_t)((trig >> 8) & 0xFF),
             (uint8_t)(hold & 0xFF),        (uint8_t)((hold >> 8) & 0xFF),
@@ -607,48 +540,31 @@ void LD2402Component::cmd_auto_threshold(
         at.callback = [this, cb](const std::vector<uint8_t> &d) {
             bool ok = (d.size() >= 4 && d[2] == 0);
             cb(ok);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(at);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_auto_progress(std::function<void(int)> cb) {
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, cb](const std::vector<uint8_t>&) {
+void LD2402Component::cmd_auto_progress() {
+    enqueue_enable_cmd_([this](const std::vector<uint8_t>&) {
         CmdQueueItem ap;
         ap.payload       = build_frame(CMD_AUTO_PROGRESS);
         ap.is_config_cmd = true;
-        ap.callback = [this, cb](const std::vector<uint8_t> &d) {
+        ap.callback = [this](const std::vector<uint8_t> &d) {
+            ESP_LOGW(TAG, "Simple %d", (uint16_t)d);
             int progress = 0;
             if (d.size() >= 6 && d[2] == 0)
                 progress = (int)((uint16_t)d[4] | ((uint16_t)d[5] << 8));
-            cb(progress);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            progress_ = (uint16_t)progress;
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(ap);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
 void LD2402Component::cmd_auto_gain(std::function<void(bool)> cb) {
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, cb](const std::vector<uint8_t>&) {
+    enqueue_enable_cmd_([this, cb](const std::vector<uint8_t>&) {
         CmdQueueItem ag;
         ag.payload       = build_frame(CMD_AUTO_GAIN);
         ag.is_config_cmd = true;
@@ -656,24 +572,14 @@ void LD2402Component::cmd_auto_gain(std::function<void(bool)> cb) {
         ag.callback = [this, cb](const std::vector<uint8_t> &d) {
             bool ok = (d.size() >= 4 && d[2] == 0);
             cb(ok);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(ag);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
-void LD2402Component::cmd_read_param(uint16_t id,
-                                      std::function<void(uint32_t)> cb) {
-    CmdQueueItem en;
-    uint8_t en_val[] = {0x01, 0x00};
-    en.payload       = build_frame(CMD_ENABLE_CONFIG, en_val, 2);
-    en.is_config_cmd = true;
-    en.callback = [this, id, cb](const std::vector<uint8_t>&) {
+void LD2402Component::cmd_read_param(uint16_t id,std::function<void(uint32_t)> cb) {
+    enqueue_enable_cmd_([this, id, cb](const std::vector<uint8_t>&) {
         uint8_t val[2] = {(uint8_t)(id & 0xFF), (uint8_t)((id >> 8) & 0xFF)};
         CmdQueueItem rp;
         rp.payload       = build_frame(CMD_READ_PARAMS, val, 2);
@@ -685,15 +591,10 @@ void LD2402Component::cmd_read_param(uint16_t id,
                   | ((uint32_t)d[6] << 16) | ((uint32_t)d[7] << 24);
             }
             cb(v);
-            CmdQueueItem end;
-            end.payload       = build_frame(CMD_END_CONFIG);
-            end.is_config_cmd = true;
-            end.callback      = [](const std::vector<uint8_t>&){};
-            enqueue_cmd_(end);
+            enqueue_end_cmd_();
         };
         enqueue_cmd_(rp);
-    };
-    enqueue_cmd_(en);
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -813,26 +714,22 @@ void LD2402Component::handle_web_info_(AsyncWebServerRequest *request) {
     char buf[512];
     snprintf(buf, sizeof(buf),
         "{\"fw\":\"%s\",\"sn\":\"%s\","
-        "\"engineer\":%s,\"result\":%d,\"dist\":%d,"
-        "\"motion_th\":[",
+        "\"engineer\":%s,\"progress\":\"%d\","
+        "\"result\":%d,\"dist\":%d,\"motion_th\":[",
         this->firmware_ver_.c_str(), this->sn_str_.c_str(),
-        this->engineer_mode_ ? "true" : "false",
+        this->engineer_mode_ ? "true" : "false", this->progress_,
         this->detection_result_, this->target_distance_);
 
     std::string json(buf);
     for (int i = 0; i < NUM_GATES; i++) {
         char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%u%s",
-                 this->motion_thresholds_[i],
-                 i < NUM_GATES - 1 ? "," : "");
+        snprintf(tmp, sizeof(tmp), "%u%s",this->motion_thresholds_[i],i < NUM_GATES - 1 ? "," : "");
         json += tmp;
     }
     json += "],\"micro_th\":[";
     for (int i = 0; i < NUM_GATES; i++) {
         char tmp[32];
-        snprintf(tmp, sizeof(tmp), "%u%s",
-                 this->micro_thresholds_[i],
-                 i < NUM_GATES - 1 ? "," : "");
+        snprintf(tmp, sizeof(tmp), "%u%s",this->micro_thresholds_[i],i < NUM_GATES - 1 ? "," : "");
         json += tmp;
     }
     json += "],\"motion\":[";
@@ -885,75 +782,87 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
     };
 
     std::string cmd = get_str_val(body, "cmd");
-
-    if (cmd == "set_engineer") {
-        bool enable = get_num_val(body, "value") != 0;
-        this->cmd_set_engineer_mode(enable, [](bool) {});
+    auto send_ok = [request]() {
         request->send(200, "application/json", "{\"ok\":true}");
+    };
 
-    } else if (cmd == "read_thresholds") {
-        bool micro = get_num_val(body, "micro") != 0;
-        this->cmd_read_gate_thresholds(micro, [](const std::vector<uint32_t>&) {});
-        request->send(200, "application/json", "{\"ok\":true}");
+    using CmdHandler = std::function<void()>;
+    std::unordered_map<std::string, CmdHandler> handlers = {
+        {"set_engineer", [&]() {
+            bool enable = get_num_val(body, "value") != 0;
+            this->cmd_set_engineer_mode(enable, [](bool) {});
+            send_ok();
+        }},
+        {"read_thresholds", [&]() {
+            bool micro = get_num_val(body, "micro") != 0;
+            this->cmd_read_gate_thresholds(micro, [](const std::vector<uint32_t>&) {});
+            send_ok();
+        }},
+        {"write_threshold", [&]() {
+            bool     micro = get_num_val(body, "micro") != 0;
+            int      gate  = (int)get_num_val(body, "gate");
+            uint32_t raw   = (uint32_t)get_num_val(body, "value");
+            this->cmd_write_gate_threshold(micro, (uint8_t)gate, raw, [](bool) {});
+            send_ok();
+        }},
+        {"auto_threshold", [&]() {
+            uint16_t trig  = (uint16_t)get_num_val(body, "trig");
+            uint16_t hold  = (uint16_t)get_num_val(body, "hold");
+            uint16_t micro = (uint16_t)get_num_val(body, "micro");
+            this->cmd_auto_threshold(trig, hold, micro, [](bool) {});
+            send_ok();
+        }},
+        {"auto_progress", [&]() {
+            this->cmd_auto_progress();
+            char buf[48];
+            snprintf(buf, sizeof(buf), "{\"ok\":true,\"progress\":%d}", this->progress_);
+            request->send(200, "application/json", buf);
+        }},
+        {"auto_gain", [&]() {
+            this->cmd_auto_gain([](bool) {});
+            send_ok();
+        }},
+        {"save_flash", [&]() {
+            this->cmd_save_params([](bool ok) {
+                ESP_LOGI("ld2402", "Flash save result: %s", ok ? "OK" : "FAIL");
+            });
+            send_ok();
+        }},
+        {"set_max_distance", [&]() {
+            uint32_t gates = (uint32_t)get_num_val(body, "value");
+            gates = std::min((uint32_t)16, std::max((uint32_t)1, gates));
+            this->max_distance_gates_ = gates;
+            uint32_t param_val = gates * 7;
+            if (param_val > 100) param_val = 100;
+            this->cmd_write_params_batch({{0x0001, param_val}}, [](bool) {});
+            send_ok();
+        }},
+        {"set_timeout", [&]() {
+            uint32_t secs = (uint32_t)get_num_val(body, "value");
+            secs = std::min((uint32_t)3600, std::max((uint32_t)0, secs));
+            this->absence_timeout_ = secs;
+            this->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
+            send_ok();
+        }},
+        {"read_info", [&]() {
+            this->cmd_read_firmware([this](const std::string &ver) {
+                this->firmware_ver_ = ver;
+                if (this->firmware_sensor_) this->firmware_sensor_->publish_state(ver);
+            });
+            this->cmd_read_sn([this](const std::string &sn) { this->sn_str_ = sn; });
+            this->cmd_read_gate_thresholds(false, [](const std::vector<uint32_t>&) {});
+            this->cmd_read_gate_thresholds(true,  [](const std::vector<uint32_t>&) {});
+            this->cmd_read_param(0x0001, [this](uint32_t v) {
+                if (v >= 7 && v <= 100) this->max_distance_gates_ = v / 7;
+            });
+            this->cmd_read_param(0x0004, [this](uint32_t v) { this->absence_timeout_ = v; });
+            send_ok();
+        }},
+    };
 
-    } else if (cmd == "write_threshold") {
-        bool     micro = get_num_val(body, "micro") != 0;
-        int      gate  = (int)get_num_val(body, "gate");
-        uint32_t raw   = (uint32_t)get_num_val(body, "value");
-        this->cmd_write_gate_threshold(micro, (uint8_t)gate, raw, [](bool) {});
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "auto_threshold") {
-        uint16_t trig  = (uint16_t)get_num_val(body, "trig");
-        uint16_t hold  = (uint16_t)get_num_val(body, "hold");
-        uint16_t micro = (uint16_t)get_num_val(body, "micro");
-        this->cmd_auto_threshold(trig, hold, micro, [](bool) {});
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "auto_progress") {
-        request->send(200, "application/json", "{\"ok\":true,\"progress\":0}");
-
-    } else if (cmd == "auto_gain") {
-        this->cmd_auto_gain([](bool) {});
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "save_flash") {
-        this->cmd_save_params([](bool ok) {
-            ESP_LOGI("ld2402", "Flash save result: %s", ok ? "OK" : "FAIL");
-        });
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "set_max_distance") {
-        uint32_t gates = (uint32_t)get_num_val(body, "value");
-        gates = std::min((uint32_t)16, std::max((uint32_t)1, gates));
-        this->max_distance_gates_ = gates;
-        // ✅ 每门 0.7m，转换为 0.1m 单位（×7），上限 100
-        uint32_t param_val = gates * 7;
-        if (param_val > 100) param_val = 100;
-        this->cmd_write_params_batch({{0x0001, param_val}}, [](bool) {});
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "set_timeout") {
-        uint32_t secs = (uint32_t)get_num_val(body, "value");
-        secs = std::min((uint32_t)3600, std::max((uint32_t)0, secs));
-        this->absence_timeout_ = secs;
-        this->cmd_write_params_batch({{0x0004, secs}}, [](bool) {});
-        request->send(200, "application/json", "{\"ok\":true}");
-
-    } else if (cmd == "read_info") {
-        this->cmd_read_firmware([this](const std::string &ver) {
-            this->firmware_ver_ = ver;
-            if (this->firmware_sensor_) this->firmware_sensor_->publish_state(ver);
-        });
-        this->cmd_read_sn([this](const std::string &sn) { this->sn_str_ = sn; });
-        this->cmd_read_gate_thresholds(false, [](const std::vector<uint32_t>&) {});
-        this->cmd_read_gate_thresholds(true,  [](const std::vector<uint32_t>&) {});
-        this->cmd_read_param(0x0001, [this](uint32_t v) {
-            if (v >= 7 && v <= 100) this->max_distance_gates_ = v / 7;
-        });
-        this->cmd_read_param(0x0004, [this](uint32_t v) { this->absence_timeout_ = v; });
-        request->send(200, "application/json", "{\"ok\":true}");
-
+    auto it = handlers.find(cmd);
+    if (it != handlers.end()) {
+        it->second();
     } else {
         request->send(400, "application/json", "{\"ok\":false,\"error\":\"Unknown command\"}");
     }

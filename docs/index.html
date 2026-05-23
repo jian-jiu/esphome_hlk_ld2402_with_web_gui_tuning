@@ -1,4 +1,4 @@
-<!-- 此页面方便调试使用 -->
+<!-- 此页面方便调试使用 可压缩后粘贴到 ld2402_web.h [压缩网站](https://www.jyshare.com/front-end/47/) -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -111,8 +111,7 @@
             <div class="config-item">
                     <label>无人超时时间
                     <input type="number" id="timeout-input" min="0" max="3600" step="5" value="30"
-                           style="width:80px;background:#0d1117;border:1px solid #333;border-radius:6px;
-                      padding:4px 8px;color:#ddd;font-size:.85rem">
+                           style="width:80px;background:#0d1117;border:1px solid #333;border-radius:6px;padding:4px 8px;color:#ddd;font-size:.85rem">
                     <span style="font-size:.78rem;color:#888;min-width:0">秒</span>
                     </label>
             </div>
@@ -130,9 +129,32 @@
             <button class="btn btn-toggle"  id="btn-eng" onclick="toggleEngineer()">⚙️ 工程模式</button>
             <button class="btn btn-success" onclick="apiCmd('auto_gain')">📶 自动增益</button>
             <button class="btn btn-danger"  onclick="saveFlash()">💾 保存到Flash</button>
+            <button class="btn btn-warn"    onclick="showAutoThreshold()">🎯 自动门限</button>
         </div>
     </div>
 
+    <!-- 自动门限面板 -->
+    <div class="card" id="auto-th-panel" style="display:none">
+        <div class="card-title" style="margin-bottom:10px">自动门限生成</div>
+        <div class="coeff-row">
+            <label>触发系数
+                <input type="number" id="coeff-trig" value="3" min="1" max="100">
+            </label>
+            <label>保持系数
+                <input type="number" id="coeff-hold" value="3" min="1" max="100">
+            </label>
+            <label>微动系数
+                <input type="number" id="coeff-micro" value="3" min="1" max="100">
+            </label>
+        </div>
+        <div class="btn-row">
+            <button class="btn btn-warn" onclick="startAutoThreshold(); queryProgress();">▶ 开始生成</button>
+        </div>
+        <div class="progress-bar-outer">
+            <div class="progress-bar-inner" id="auto-progress" style="width:0%"></div>
+        </div>
+        <div style="font-size:.78rem;color:#888" id="auto-progress-label">进度：0%</div>
+    </div>
 
     <!-- 日志输出 -->
     <div class="card">
@@ -159,7 +181,7 @@
 </div>
 
 <script>
-    const BASE_URL = "http://192.168.155/config";
+    const BASE_URL = "http://192.168.2.155/config";
     const NUM_GATES = 16;
     const DB_MIN    = 20;   // 显示区间下限 dB
     const DB_MAX    = 70;   // 显示区间上限 dB
@@ -198,7 +220,8 @@
     }
     function percentToRaw(pct) {
         const db      = DB_MIN + (pct / 100) * (DB_MAX - DB_MIN);
-        const snapped = Math.round(db * 10) / 10;
+        const snapped = Math.round(db);
+        // const snapped = Math.round(db * 10) / 10;
         return dbToRaw(snapped);
     }
     function fmtDb(raw) {
@@ -301,14 +324,16 @@
                 const bar    = document.getElementById(`energy-${type}-${i}`);
                 const elabel = document.getElementById(`elabel-${type}-${i}`);
                 if (!bar) return;
+                if (!elabel) return;
 
                 const pct = Math.min(100, Math.max(0,
                     (display - DB_MIN) / (DB_MAX - DB_MIN) * 100));
                 bar.style.width = pct + '%';
 
-                if (elabel) {
-                    elabel.textContent = display > DB_MIN ? display.toFixed(1) + ' dB' : '- -';
-                }
+                elabel.textContent = display > 0 ? display.toFixed(1) + ' dB' : '- -';
+
+                const thlabel = document.getElementById(`thlabel-${type}-${i}`);
+                elabel.style.color = display.toFixed(1) >= parseFloat(thlabel.textContent) ? "red" : "#42a5f5";
             });
         });
     }

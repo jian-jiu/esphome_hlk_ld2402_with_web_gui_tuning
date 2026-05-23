@@ -78,7 +78,8 @@ public:
     void cmd_save_params(std::function<void(bool)> cb);
     void cmd_auto_threshold(uint16_t trig, uint16_t hold, uint16_t micro_coeff,
                             std::function<void(bool)> cb);
-    void cmd_auto_progress(std::function<void(int)> cb);
+    void cmd_auto_progress();
+    // void cmd_auto_progress(std::function<void(int)> cb);
     void cmd_auto_gain(std::function<void(bool)> cb);
     void cmd_read_param(uint16_t id, std::function<void(uint32_t)> cb);
     void enqueue_cmd_(CmdQueueItem item);
@@ -106,6 +107,9 @@ private:
         CMD_HEADER, CMD_LENGTH, CMD_DATA, CMD_FOOTER,
         DAT_HEADER, DAT_LENGTH, DAT_DATA, DAT_FOOTER
     };
+
+    void enqueue_enable_cmd_(std::function<void(const std::vector<uint8_t>&)> cb = nullptr);
+    void enqueue_end_cmd_();
 
     void parse_byte_(uint8_t b);
     void dispatch_cmd_frame_(const std::vector<uint8_t> &data);
@@ -143,6 +147,7 @@ private:
     uint16_t target_distance_{0};
     uint32_t motion_energy_[NUM_GATES]{};
     uint32_t micro_energy_[NUM_GATES]{};
+    uint8_t  progress_{0};
 
     // 命令队列 — 使用 deque 以支持 pop_front
     std::deque<CmdQueueItem>          cmd_queue_;        // deque，支持 pop_front
