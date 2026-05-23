@@ -692,7 +692,6 @@
                 badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
                 badge.className = 'badge ' + (present ? '' : 'away');
                 const iBadge = document.getElementById('interference-badge');
-                console.log(d.interference)
                 if (d.interference === 1) {
                     iBadge.textContent = '电源无干扰';
                     iBadge.className = 'badge success';
