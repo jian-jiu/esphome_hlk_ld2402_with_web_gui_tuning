@@ -69,6 +69,11 @@ binary_sensor:
     name: "Occupancy"
     device_class: occupancy
 
+  - platform: ld2402
+      ld2402_id: my_ld2402
+      name: "电源干扰报警"
+      type: interference
+
 sensor:
   - platform: ld2402
     ld2402_id: ld2402_radar

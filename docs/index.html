@@ -59,6 +59,11 @@
             color: #666
         }
 
+        .badge.interference {
+            background: #4a3500;
+            color: #ffa500
+        }
+
         .card {
             background: #1a1a2e;
             border-radius: 12px;
@@ -453,6 +458,7 @@
             <div class="card-title">门限调整（请先开启工程模式）</div>
             <div class="gate-status">
                 <span id="presence-badge" class="badge unknown">未知</span>
+                <span id="interference-badge" class="badge unknown" style="display:none">电源干扰</span>
                 <span id="dist" class="dist-label">- -</span>
             </div>
         </div>
@@ -680,6 +686,13 @@
                 const badge = document.getElementById('presence-badge');
                 badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
                 badge.className = 'badge ' + (present ? '' : 'away');
+                const iBadge = document.getElementById('interference-badge');
+                if (d.interference) {
+                    iBadge.style.display = '';
+                    iBadge.className = 'badge interference';
+                } else {
+                    iBadge.style.display = 'none';
+                }
                 updateEnergyBars(d);
             } catch (err) {
             }
@@ -832,6 +845,7 @@
                     badge.textContent = '未知';
                     badge.className = 'badge unknown';
                     document.getElementById('dist').textContent = '- -';
+                    document.getElementById('interference-badge').style.display = 'none';
                 }
                 if (d.max_distance) {
                     document.getElementById('max-dist-slider').value = d.max_distance;
@@ -839,6 +853,13 @@
                 }
                 if (d.timeout !== undefined)
                     document.getElementById('timeout-input').value = d.timeout;
+                const iBadge = document.getElementById('interference-badge');
+                if (d.interference) {
+                    iBadge.style.display = '';
+                    iBadge.className = 'badge interference';
+                } else {
+                    iBadge.style.display = 'none';
+                }
                 if (d.motion_th && d.motion_th.length)
                     d.motion_th.forEach((raw, i) => updateThumbUI('motion', i, raw));
                 if (d.micro_th && d.micro_th.length)

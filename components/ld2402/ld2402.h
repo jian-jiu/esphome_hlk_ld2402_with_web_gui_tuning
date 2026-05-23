@@ -64,6 +64,7 @@ public:
     void set_distance_sensor(sensor::Sensor *s)                    { distance_sensor_ = s; }
     void set_firmware_sensor(text_sensor::TextSensor *s)           { firmware_sensor_ = s; }
     void set_work_mode_sensor(text_sensor::TextSensor *s)          { work_mode_sensor_ = s; }
+    void set_interference_sensor(binary_sensor::BinarySensor *s)   { interference_sensor_ = s; }
 
     // 公开命令接口
     void cmd_read_firmware(std::function<void(const std::string&)> cb);
@@ -134,6 +135,7 @@ private:
 #endif
 
     binary_sensor::BinarySensor *presence_sensor_{nullptr};
+    binary_sensor::BinarySensor *interference_sensor_{nullptr};
     sensor::Sensor               *distance_sensor_{nullptr};
     text_sensor::TextSensor       *firmware_sensor_{nullptr};
     text_sensor::TextSensor       *work_mode_sensor_{nullptr};

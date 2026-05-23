@@ -304,6 +304,7 @@ void LD2402Component::parse_normal_line_(const std::string &line) {
         target_distance_  = 0;
         if (presence_sensor_) presence_sensor_->publish_state(false);
         if (distance_sensor_)  distance_sensor_->publish_state(0);
+        if (interference_sensor_) interference_sensor_->publish_state(false);
 
     } else if (line.rfind("distance:", 0) == 0) {
         std::string num = line.substr(9);
@@ -354,11 +355,13 @@ void LD2402Component::dispatch_data_frame_(const std::vector<uint8_t> &data) {
     }
 
     bool has_presence = (detection_result_ != 0x00);
+    bool has_interference = (detection_result_ == 0x03);
     // 无人时距离归零，与正常模式 HA 实体行为一致
     if (!has_presence) target_distance_ = 0;
 
     if (presence_sensor_) presence_sensor_->publish_state(has_presence);
     if (distance_sensor_) distance_sensor_->publish_state(has_presence ? (float)target_distance_ : 0.0f);
+    if (interference_sensor_) interference_sensor_->publish_state(has_interference);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -690,10 +693,11 @@ void LD2402Component::register_web_handler_() {
 #if !defined(USE_ESP32) && defined(USE_ARDUINO)
 void LD2402Component::push_sse_update_() {
     if (this->engineer_mode_) {
-        char buf[1100];
+        char buf[1150];
         int len = snprintf(buf, sizeof(buf),
-            "{\"result\":%d,\"dist\":%d,\"motion\":[",
-            this->detection_result_, this->target_distance_);
+            "{\"result\":%d,\"dist\":%d,\"interference\":%s,\"motion\":[",
+            this->detection_result_, this->target_distance_,
+            this->detection_result_ == 0x03 ? "true" : "false");
 
         for (int i = 0; i < NUM_GATES; i++) {
             len += snprintf(buf + len, sizeof(buf) - len,
@@ -709,8 +713,10 @@ void LD2402Component::push_sse_update_() {
         len += snprintf(buf + len, sizeof(buf) - len, "]}");
         this->sse_.send(buf);
     } else {
-        char buf[128];
-        snprintf(buf, sizeof(buf), "{\"result\":%d,\"dist\":%d}", this->detection_result_, this->target_distance_);
+        char buf[160];
+        snprintf(buf, sizeof(buf), "{\"result\":%d,\"dist\":%d,\"interference\":%s}",
+            this->detection_result_, this->target_distance_,
+            this->detection_result_ == 0x03 ? "true" : "false");
         this->sse_.send(buf);
     }
 }
@@ -780,14 +786,15 @@ void LD2402Component::handle_web_root_(AsyncWebServerRequest *request) {
 }
 
 void LD2402Component::handle_web_info_(AsyncWebServerRequest *request) {
-    char buf[512];
+    char buf[550];
     snprintf(buf, sizeof(buf),
         "{\"fw\":\"%s\",\"sn\":\"%s\","
         "\"engineer\":%s,\"progress\":\"%d\","
-        "\"result\":%d,\"dist\":%d,\"motion_th\":[",
+        "\"result\":%d,\"dist\":%d,\"interference\":%s,\"motion_th\":[",
         this->firmware_ver_.c_str(), this->sn_str_.c_str(),
         this->engineer_mode_ ? "true" : "false", this->progress_,
-        this->detection_result_, this->target_distance_);
+        this->detection_result_, this->target_distance_,
+        this->detection_result_ == 0x03 ? "true" : "false");
 
     std::string json(buf);
     for (int i = 0; i < NUM_GATES; i++) {
