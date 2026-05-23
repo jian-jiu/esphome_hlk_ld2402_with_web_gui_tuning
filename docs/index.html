@@ -756,14 +756,14 @@
     function showAutoThreshold() {
         const panel = document.getElementById('auto-th-panel');
         const auto = document.getElementById('btn-auto');
-        auto.textContent = panel.style.display === 'none' ? '🎯 自动门限 🔼' : '🎯 自动门限 🔽'
+        auto.textContent = panel.style.display === 'none' ? '🎯 自动门限 🔼' : '🎯 自动门限 🔽';
         panel.style.display = panel.style.display === 'none' ? '' : 'none';
     }
 
     function startAutoThreshold() {
         const auto = document.getElementById('auto-bt');
-        auto.textContent = 'ℹ️ 生成中(请耐心等待)'
-        auto.disabled = true
+        auto.textContent = 'ℹ️ 生成中(请耐心等待)';
+        auto.disabled = true;
         const trig = parseInt(document.getElementById('coeff-trig').value);
         const hold = parseInt(document.getElementById('coeff-hold').value);
         const micro = parseInt(document.getElementById('coeff-micro').value);
@@ -788,8 +788,8 @@
             if (p >= 100) {
                 clearInterval(progressTimer);
                 const auto = document.getElementById('auto-bt');
-                auto.textContent = '▶ 开始生成'
-                auto.disabled = false
+                auto.textContent = '▶ 开始生成';
+                auto.disabled = false;
                 log('自动门限生成完成！');
                 await fetchInfo();
             }
