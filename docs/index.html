@@ -64,6 +64,11 @@
             color: #ffa500
         }
 
+        .badge.success {
+            background: #2e7d32;
+            color: #fff
+        }
+
         .card {
             background: #1a1a2e;
             border-radius: 12px;
@@ -458,7 +463,7 @@
             <div class="card-title">门限调整（请先开启工程模式）</div>
             <div class="gate-status">
                 <span id="presence-badge" class="badge unknown">未知</span>
-                <span id="interference-badge" class="badge unknown" style="display:none">电源干扰</span>
+                <span id="interference-badge" class="badge unknown">电源干扰(进行中)</span>
                 <span id="dist" class="dist-label">- -</span>
             </div>
         </div>
@@ -687,11 +692,13 @@
                 badge.textContent = d.result === 0 ? '无人' : d.result === 1 ? '有人' : '有人(静止)';
                 badge.className = 'badge ' + (present ? '' : 'away');
                 const iBadge = document.getElementById('interference-badge');
-                if (d.interference) {
-                    iBadge.style.display = '';
+                console.log(d.interference)
+                if (d.interference === 1) {
+                    iBadge.textContent = '电源无干扰';
+                    iBadge.className = 'badge success';
+                } else if (d.interference === 2) {
+                    iBadge.textContent = '电源有干扰';
                     iBadge.className = 'badge interference';
-                } else {
-                    iBadge.style.display = 'none';
                 }
                 updateEnergyBars(d);
             } catch (err) {
