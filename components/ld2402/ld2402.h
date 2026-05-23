@@ -112,6 +112,9 @@ private:
     void enqueue_end_cmd_();
 
     void parse_byte_(uint8_t b);
+    bool check_parse_timeout_();
+    bool scan_cmd_header_(uint8_t b);
+    bool scan_data_header_(uint8_t b);
     void dispatch_cmd_frame_(const std::vector<uint8_t> &data);
     void dispatch_data_frame_(const std::vector<uint8_t> &data);
     void parse_normal_line_(const std::string &line);
@@ -136,6 +139,9 @@ private:
     text_sensor::TextSensor       *work_mode_sensor_{nullptr};
 
     ParseState parse_state_{ParseState::IDLE};
+    uint32_t parse_state_ms_{0};
+    uint8_t  cmd_hdr_match_{0};
+    uint8_t  dat_hdr_match_{0};
     uint8_t  hdr_idx_{0};
     uint16_t frame_len_{0};
     uint16_t frame_recv_{0};

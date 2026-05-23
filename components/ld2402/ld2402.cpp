@@ -114,9 +114,20 @@ void LD2402Component::process_rx_() {
 }
 
 void LD2402Component::parse_byte_(uint8_t b) {
+    // ── 超时保护：非 IDLE 状态超过 150ms 强制回 IDLE ──
+    if (parse_state_ != ParseState::IDLE && check_parse_timeout_()) {
+        ESP_LOGW(TAG, "Parse timeout in state %d, reset to IDLE", (int) parse_state_);
+        parse_state_ = ParseState::IDLE;
+        frame_buf_.clear();
+        line_buf_.clear();
+    }
+    parse_state_ms_ = millis();
+
     switch (parse_state_) {
         case ParseState::IDLE:
             hdr_idx_ = 0;
+            cmd_hdr_match_ = 0;
+            dat_hdr_match_ = 0;
             frame_buf_.clear();
             if (b == CMD_HEADER[0]) {
                 parse_state_ = ParseState::CMD_HEADER;
@@ -165,6 +176,15 @@ void LD2402Component::parse_byte_(uint8_t b) {
             }
             break;
         case ParseState::CMD_DATA:
+            // ── 同样检查是否出现了 DATA 头标记 ──
+            if (engineer_mode_ && scan_data_header_(b)) {
+                ESP_LOGD(TAG, "DATA header detected in CMD_DATA, aborting CMD frame");
+                frame_buf_.clear();
+                frame_len_ = 0;
+                frame_recv_ = 0;
+                parse_state_ = ParseState::DAT_LENGTH;
+                break;
+            }
             frame_buf_.push_back(b);
             frame_recv_++;
             if (frame_recv_ >= frame_len_) {
@@ -207,6 +227,18 @@ void LD2402Component::parse_byte_(uint8_t b) {
             }
             break;
         case ParseState::DAT_DATA:
+            // ── 关键修复：扫描是否出现了 CMD 头标记 ──
+            // 工程模式下 DATA 帧和 CMD 回复交错在同一字节流中，
+            // 如果当前帧的长度计算有误（帧同步丢失），CMD 回复的
+            // 头字节会被当成 DATA 的 payload 吞掉，导致命令永远收不到 ACK。
+            if (scan_cmd_header_(b)) {
+                ESP_LOGD(TAG, "CMD header detected in DAT_DATA, aborting DATA frame");
+                frame_buf_.clear();
+                frame_len_ = 0;
+                frame_recv_ = 0;
+                parse_state_ = ParseState::CMD_LENGTH;
+                break;
+            }
             frame_buf_.push_back(b);
             frame_recv_++;
             if (frame_recv_ >= frame_len_) {
@@ -226,6 +258,44 @@ void LD2402Component::parse_byte_(uint8_t b) {
             }
             break;
     }
+}
+
+// ── 检查解析是否卡死（非 IDLE 超过 150ms 无字节到达）──
+bool LD2402Component::check_parse_timeout_() {
+    return (millis() - parse_state_ms_) > 150;
+}
+
+// ── 4字节移位寄存器检测 CMD 头 FD FC FB FA ──
+bool LD2402Component::scan_cmd_header_(uint8_t b) {
+    if (cmd_hdr_match_ < 4) {
+        if (b == CMD_HEADER[cmd_hdr_match_]) {
+            cmd_hdr_match_++;
+            if (cmd_hdr_match_ == 4) {
+                cmd_hdr_match_ = 0;
+                return true;
+            }
+        } else {
+            // 0xFD 自身也可能是下一帧的起始
+            cmd_hdr_match_ = (b == CMD_HEADER[0]) ? 1 : 0;
+        }
+    }
+    return false;
+}
+
+// ── 4字节移位寄存器检测 DATA 头 F4 F3 F2 F1 ──
+bool LD2402Component::scan_data_header_(uint8_t b) {
+    if (dat_hdr_match_ < 4) {
+        if (b == DATA_HEADER[dat_hdr_match_]) {
+            dat_hdr_match_++;
+            if (dat_hdr_match_ == 4) {
+                dat_hdr_match_ = 0;
+                return true;
+            }
+        } else {
+            dat_hdr_match_ = (b == DATA_HEADER[0]) ? 1 : 0;
+        }
+    }
+    return false;
 }
 
 void LD2402Component::parse_normal_line_(const std::string &line) {
@@ -314,20 +384,19 @@ void LD2402Component::pump_cmd_queue_() {
                          : cmd_in_flight_->timeout_ms;
 
         if (elapsed > timeout) {
-            std::string hex;
-            for (uint8_t b : cmd_in_flight_->payload) {
-                char buf[4];
-                snprintf(buf, sizeof(buf), "%02X ", b);
-                hex += buf;
-            }
-            ESP_LOGW(TAG, "Command error, payload: %s", hex.c_str());
             if (cmd_in_flight_->retry_count < 2) {
                 ESP_LOGW(TAG, "Command timeout, retry %d/2", cmd_in_flight_->retry_count + 1);
                 cmd_in_flight_->retry_count++;
                 send_cmd_frame_(*cmd_in_flight_);
                 cmd_sent_ms_ = millis();
             } else {
-                ESP_LOGW(TAG, "Command failed after 3 attempts");
+                std::string hex;
+                for (uint8_t b : cmd_in_flight_->payload) {
+                    char buf[4];
+                    snprintf(buf, sizeof(buf), "%02X ", b);
+                    hex += buf;
+                }
+                ESP_LOGW(TAG, "Command failed after 3 attempts, payload: %s", hex.c_str());
                 if (cmd_in_flight_->on_timeout)
                     cmd_in_flight_->on_timeout();
                 cmd_in_flight_.reset();
@@ -852,9 +921,7 @@ void LD2402Component::handle_web_cmd_(AsyncWebServerRequest *request) {
             this->cmd_read_sn([this](const std::string &sn) { this->sn_str_ = sn; });
             this->cmd_read_gate_thresholds(false, [](const std::vector<uint32_t>&) {});
             this->cmd_read_gate_thresholds(true,  [](const std::vector<uint32_t>&) {});
-            this->cmd_read_param(0x0001, [this](uint32_t v) {
-                if (v >= 7 && v <= 100) this->max_distance_gates_ = v / 7;
-            });
+            this->cmd_read_param(0x0001, [this](uint32_t v) {if (v >= 7 && v <= 100) this->max_distance_gates_ = v / 7;});
             this->cmd_read_param(0x0004, [this](uint32_t v) { this->absence_timeout_ = v; });
             send_ok();
         }},
