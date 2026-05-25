@@ -6,9 +6,11 @@ A ESPhome External Component Working With HLK-LD2402 Radar Sensor. Tuning with b
 ## 使用说明：
 * 雷达固件版本需高于或等于v3.3.5,使用官方上位机连接到雷达uart来检查固件及ota固件
 * 仅提供传感器类HA实体(距离、人在、固件版本、工作模式等)，所有调参实体集中到web-gui
+* 提供http api端点，可使用外部http工具调用
 * 没有自动门限生成功能
 * 在esphome 2026.4.5上测试通过
-* 对内存有一定需求，只支持esp32不支持esp8266
+* dev分支支持多实例，即配置多个ld2402组件。通过id进行区分，未测试，暂不合并
+* 对内存与组件库有要求，只支持esp32系列并使用esp-idf框架，不支持esp8266
   ```
   esp32:
     board: esp32-c3-devkitm-1
@@ -87,3 +89,30 @@ text_sensor:
 * 访问设备IP:web_port,进入调参界面
 * 实时能量需要先开启工程模式，调试完记得关闭工程模式
 * 任何修改都记得保存到flash来持久化
+  
+## http api
+| 端点 | 方法 | 用途 |
+|---|---|---|
+| `/` | GET | Web 管理页面（HTML） |
+| `/api/info` | GET | 获取雷达状态/配置信息 |
+| `/api/cmd` | POST | 发送控制命令 |
+| `/sse` | GET | 实时能量数据流|
+
+* cmd端点payload格式，可通过web调试或分析源码ld2402.cpp内的handle_api_cmd方法取得
+
+
+## 多实例
+```
+ld2402:
+  - id: ld2402_radar_1
+    uart_id: uart_ld2402_1
+    web_port: ${web_port_1}
+    web_username: ${web_user}
+    web_password: ${web_passwd}
+
+  - id: ld2402_radar_2
+    uart_id: uart_ld2402_2
+    web_port: ${web_port_2}   #需要使用不同的端口，多实例间的端口最好不要相邻
+    web_username: ${web_user}
+    web_password: ${web_passwd}
+```
