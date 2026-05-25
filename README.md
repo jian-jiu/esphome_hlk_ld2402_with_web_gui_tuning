@@ -11,6 +11,7 @@ A ESPhome External Component Working With HLK-LD2402 Radar Sensor. Tuning with b
 * 在esphome 2026.4.5上测试通过
 * dev分支支持多实例，即配置多个ld2402组件。通过id进行区分，未测试，暂不合并
 * 对内存与组件库有要求，只支持esp32系列并使用esp-idf框架，不支持esp8266
+* 内存与看门狗特殊配置：
   ```
   esp32:
     board: esp32-c3-devkitm-1
@@ -54,11 +55,11 @@ uart:
 
 
 ld2402:
-  id: ld2402_radar
-  uart_id: uart_ld2402
-  web_port: 8080  #set a web-gui port
-  web_username: admin # set a web-gui basic-auth username
-  web_password: admin  # set a web-gui basic-auth password
+  - id: ld2402_radar
+    uart_id: uart_ld2402
+    web_port: 8080  #set a web-gui port
+    web_username: admin # set a web-gui basic-auth username
+    web_password: admin  # set a web-gui basic-auth password
 
 binary_sensor:
   - platform: ld2402
