@@ -5,7 +5,7 @@ from esphome.const import CONF_ID
 
 DEPENDENCIES = ["uart", "esp32", "network"] 
 AUTO_LOAD = ["binary_sensor", "sensor", "text_sensor"]
-MULTI_CONF = False
+MULTI_CONF = True
 
 ld2402_ns = cg.esphome_ns.namespace("ld2402")
 LD2402Component = ld2402_ns.class_(
