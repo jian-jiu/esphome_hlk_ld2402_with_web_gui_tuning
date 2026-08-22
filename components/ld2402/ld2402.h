@@ -19,28 +19,28 @@ namespace esphome {
 namespace ld2402 {
 
 // ─── 协议常量 ───────────────────────────────────────────────────
-static const uint8_t CMD_HEADER[4] = {0xFD, 0xFC, 0xFB, 0xFA};
-static const uint8_t CMD_FOOTER[4] = {0x04, 0x03, 0x02, 0x01};
-static const uint8_t DATA_HEADER[4] = {0xF4, 0xF3, 0xF2, 0xF1};
-static const uint8_t DATA_FOOTER[4] = {0xF8, 0xF7, 0xF6, 0xF5};
+static constexpr uint8_t CMD_HEADER[4] = {0xFD, 0xFC, 0xFB, 0xFA};
+static constexpr uint8_t CMD_FOOTER[4] = {0x04, 0x03, 0x02, 0x01};
+static constexpr uint8_t DATA_HEADER[4] = {0xF4, 0xF3, 0xF2, 0xF1};
+static constexpr uint8_t DATA_FOOTER[4] = {0xF8, 0xF7, 0xF6, 0xF5};
 
 // 命令字
-static const uint16_t CMD_READ_FW        = 0x0000;
-static const uint16_t CMD_ENABLE_CONFIG  = 0x00FF;
-static const uint16_t CMD_END_CONFIG     = 0x00FE;   // 退出配置
-static const uint16_t CMD_SAVE_PARAMS    = 0x00FD;   // 保存参数
-static const uint16_t CMD_READ_SN_STR    = 0x0011;
-static const uint16_t CMD_READ_PARAMS    = 0x0008;
-static const uint16_t CMD_WRITE_PARAMS   = 0x0007;
-static const uint16_t CMD_SET_MODE       = 0x0012;
-static const uint16_t CMD_AUTO_THRESHOLD = 0x0009;
-static const uint16_t CMD_AUTO_PROGRESS  = 0x000A;
-static const uint16_t CMD_AUTO_GAIN      = 0x00EE;
+static constexpr uint16_t CMD_READ_FW        = 0x0000;
+static constexpr uint16_t CMD_ENABLE_CONFIG  = 0x00FF;
+static constexpr uint16_t CMD_END_CONFIG     = 0x00FE;   // 退出配置
+static constexpr uint16_t CMD_SAVE_PARAMS    = 0x00FD;   // 保存参数
+static constexpr uint16_t CMD_READ_SN_STR    = 0x0011;
+static constexpr uint16_t CMD_READ_PARAMS    = 0x0008;
+static constexpr uint16_t CMD_WRITE_PARAMS   = 0x0007;
+static constexpr uint16_t CMD_SET_MODE       = 0x0012;
+static constexpr uint16_t CMD_AUTO_THRESHOLD = 0x0009;
+static constexpr uint16_t CMD_AUTO_PROGRESS  = 0x000A;
+static constexpr uint16_t CMD_AUTO_GAIN      = 0x00EE;
 
-static const uint32_t MODE_NORMAL   = 0x00000064;
-static const uint32_t MODE_ENGINEER = 0x00000004;
+static constexpr uint32_t MODE_NORMAL   = 0x00000064;
+static constexpr uint32_t MODE_ENGINEER = 0x00000004;
 
-static const uint8_t NUM_GATES = 16;
+static constexpr uint8_t NUM_GATES = 16;
 
 // ─── 命令队列项 ─────────────────────────────────────────────────
 struct CmdQueueItem {
